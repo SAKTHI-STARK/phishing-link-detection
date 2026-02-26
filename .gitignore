@@ -1,0 +1,17 @@
+__pycache__/
+*.py[cod]
+*$py.class
+env/
+venv/
+.env
+.venv
+bin/
+lib/
+share/
+Include/
+.vscode/
+.idea/
+*.log
+pickle/model.pkl
+catboost_info/
+debug_validation.py
