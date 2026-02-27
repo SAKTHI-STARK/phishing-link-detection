@@ -108,7 +108,22 @@ class FeatureExtraction:
         except: return -1
 
     def Hppts(self) -> int:
-        try: return 1 if self.urlparse and self.urlparse.scheme == 'https' else -1
+        try:
+            if not self.urlparse or self.urlparse.scheme != 'https':
+                return -1
+            
+            # If the initial request in __init__ succeeded, it's a trusted CA
+            if self.response is not None:
+                return 1
+                
+            # If initial request failed, let's see if it was an SSL error
+            try:
+                requests.get(self.url, timeout=5)
+                return 1
+            except requests.exceptions.SSLError:
+                return 0 # Untrusted / Self-signed
+            except:
+                return 0 # Connection failed for other reasons on an HTTPS link
         except: return -1
 
     def DomainRegLen(self) -> int:

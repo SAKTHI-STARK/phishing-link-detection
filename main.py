@@ -83,12 +83,16 @@ async def analyze(entry: URLEntry):
         else:
             msg = f"It is {phishing_prob*100:.2f}% unsafe (phishing detected)."
 
+        ssl_status = obj.features_dict.get("HTTPS", -1)
+        ssl_info = "Trusted CA" if ssl_status == 1 else ("Untrusted/Self-signed" if ssl_status == 0 else "No SSL")
+
         return {
             "url": url,
             "is_safe": is_safe,
             "safe_score": round(safe_prob, 4),
             "phishing_score": round(phishing_prob, 4),
             "prediction": "Safe" if is_safe else "Phishing",
+            "ssl_info": ssl_info,
             "message": msg
         }
 
