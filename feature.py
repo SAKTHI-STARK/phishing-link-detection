@@ -1,4 +1,4 @@
-import concurrent.futures
+import ssl
 import ipaddress
 import re
 import socket
@@ -10,7 +10,11 @@ from googlesearch import search
 from datetime import date
 from urllib.parse import urlparse
 
-from config import SHORTENER_REGEX, FEATURE_METHODS, DEFAULT_FEATURE_NAMES
+import asyncio
+from config import (
+    SHORTENER_REGEX, FEATURE_METHODS, DEFAULT_FEATURE_NAMES, 
+    FEATURES_NEEDING_HTML, FEATURES_NEEDING_WHOIS
+)
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -24,16 +28,12 @@ class FeatureExtraction:
         self.response = None
         self.soup = None
         self.features_dict = {}
+        self.ssl_error = False
+        self.connection_failed = False
 
-        headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
-        }
-
-        try:
-            self.response = requests.get(url, timeout=5, headers=headers)
-            self.soup = BeautifulSoup(self.response.text, 'html.parser')
-        except Exception as e:
-            logger.debug(f"Initial request failed for {url}: {e}")
+        # Events for dependency synchronization
+        self._html_event = asyncio.Event()
+        self._whois_event = asyncio.Event()
 
         try:
             self.urlparse = urlparse(url)
@@ -41,25 +41,64 @@ class FeatureExtraction:
         except Exception as e:
             logger.debug(f"Failed to parse URL {url}: {e}")
 
+    async def _setup_html(self):
+        """Fetch page content in parallel."""
+        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'}
         try:
-            self.whois_response = whois.whois(self.domain)
-        except Exception as e:
-            logger.debug(f"Whois failed for {self.domain}: {e}")
+            # Use to_thread for blocking requests call
+            resp = await asyncio.to_thread(requests.get, self.url, timeout=5, headers=headers)
+            self.response = resp
+            self.soup = BeautifulSoup(self.response.text, 'html.parser')
+        except requests.exceptions.SSLError:
+            self.ssl_error = True
+        except Exception:
+            self.connection_failed = True
+        finally:
+            self._html_event.set()
 
-        self.extract_all_to_dict()
+    async def _setup_whois(self):
+        """Fetch WHOIS data in parallel."""
+        try:
+            self.whois_response = await asyncio.to_thread(whois.whois, self.domain)
+        except Exception:
+            pass
+        finally:
+            self._whois_event.set()
+
+    async def _run_check(self, name, method_name):
+        """Run a single feature check, waiting for dependencies if necessary."""
+        try:
+            if name in FEATURES_NEEDING_HTML:
+                await self._html_event.wait()
+            elif name in FEATURES_NEEDING_WHOIS:
+                await self._whois_event.wait()
+            
+            # Run the actual sync method in a separate thread to keep the event loop responsive
+            method = getattr(self, method_name)
+            self.features_dict[name] = await asyncio.to_thread(method)
+        except Exception:
+            self.features_dict[name] = -1
+
+    async def extract(self):
+        """Coordinate parallel execution of setup tasks and all feature checks."""
+        # 1. Start setup tasks
+        setup_tasks = [
+            asyncio.create_task(self._setup_html()),
+            asyncio.create_task(self._setup_whois())
+        ]
+
+        # 2. Start all feature checks
+        check_tasks = [
+            self._run_check(name, method_name) 
+            for name, method_name in FEATURE_METHODS.items()
+        ]
+
+        # 3. Wait for everything to complete
+        await asyncio.gather(*setup_tasks, *check_tasks)
 
     def extract_all_to_dict(self):
-        # Dynamically create mapping from config
-        mapping = {name: getattr(self, method_name) for name, method_name in FEATURE_METHODS.items()}
-
-        with concurrent.futures.ThreadPoolExecutor(max_workers=15) as executor:
-            future_to_name = {executor.submit(method): name for name, method in mapping.items()}
-            for future in concurrent.futures.as_completed(future_to_name):
-                name = future_to_name[future]
-                try:
-                    self.features_dict[name] = future.result()
-                except Exception:
-                    self.features_dict[name] = -1
+        """Legacy method - now triggers a warning or should be avoided in async flow."""
+        pass
 
     def getFeaturesList(self, feature_names=None):
         """
@@ -108,23 +147,43 @@ class FeatureExtraction:
         except: return -1
 
     def Hppts(self) -> int:
+        """
+        Returns:
+        1  = Trusted CA certificate
+        0  = Self-signed certificate
+        -1 = No HTTPS
+        -2 = Connection failed
+        """
         try:
-            if not self.urlparse or self.urlparse.scheme != 'https':
+            parsed = urlparse(self.url)
+
+            if parsed.scheme != "https":
                 return -1
-            
-            # If the initial request in __init__ succeeded, it's a trusted CA
-            if self.response is not None:
-                return 1
-                
-            # If initial request failed, let's see if it was an SSL error
-            try:
-                requests.get(self.url, timeout=5)
-                return 1
-            except requests.exceptions.SSLError:
-                return 0 # Untrusted / Self-signed
-            except:
-                return 0 # Connection failed for other reasons on an HTTPS link
-        except: return -1
+
+            hostname = parsed.hostname
+
+            if not hostname:
+                return -2
+
+            ctx = ssl.create_default_context()
+
+            with socket.create_connection((hostname, 443), timeout=5) as sock:
+                with ctx.wrap_socket(sock, server_hostname=hostname) as ssock:
+                    cert = ssock.getpeercert()
+
+                    issuer = cert.get("issuer")
+                    subject = cert.get("subject")
+
+                    if issuer == subject:
+                        return 0   # self-signed
+                    else:
+                        return 1   # trusted CA
+
+        except ssl.SSLError:
+            return 0
+
+        except Exception:
+            return -2
 
     def DomainRegLen(self) -> int:
         # check if domain is registered for less than 1 year

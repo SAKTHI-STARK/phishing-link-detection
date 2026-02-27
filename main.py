@@ -5,6 +5,7 @@ import logging
 import os
 import uvicorn
 from fastapi import FastAPI, HTTPException
+from urllib.parse import urlparse
 from pydantic import BaseModel
 from feature import FeatureExtraction
 
@@ -53,10 +54,11 @@ async def root():
 async def analyze(entry: URLEntry):
     url = entry.url
 
-    if not (url.startswith("http://") or url.startswith("https://")):
+    parsed_url = urlparse(url)
+    if parsed_url.scheme not in ["http", "https"]:
         raise HTTPException(
             status_code=400, 
-            detail="Missing protocol. Please provide a full URL starting with 'http://' or 'https://'."
+            detail="Invalid protocol. Please provide a full URL starting with 'http://' or 'https://'."
         )
 
     if model is None:
@@ -66,6 +68,7 @@ async def analyze(entry: URLEntry):
         logger.info(f"Analyzing URL: {url}")
 
         obj = FeatureExtraction(url)
+        await obj.extract()
         features = obj.getFeaturesList(features_used)
 
         x = np.array(features).reshape(1, -1)
@@ -84,7 +87,14 @@ async def analyze(entry: URLEntry):
             msg = f"It is {phishing_prob*100:.2f}% unsafe (phishing detected)."
 
         ssl_status = obj.features_dict.get("HTTPS", -1)
-        ssl_info = "Trusted CA" if ssl_status == 1 else ("Untrusted/Self-signed" if ssl_status == 0 else "No SSL")
+        if ssl_status == 1:
+            ssl_info = "Trusted CA (Verified)"
+        elif ssl_status == 0:
+            ssl_info = "Untrusted / Self-signed"
+        elif ssl_status == -2:
+            ssl_info = "Link Broken / Site Down"
+        else:
+            ssl_info = "No SSL (Plain HTTP)"
 
         return {
             "url": url,

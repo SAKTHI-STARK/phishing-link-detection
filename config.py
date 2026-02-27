@@ -56,3 +56,16 @@ DEFAULT_FEATURE_NAMES = [
     "DNSRecording", "WebsiteTraffic", "PageRank", "GoogleIndex",
     "LinksPointingToPage", "StatsReport"
 ]
+
+# Features that require the website's HTML content (Soup)
+FEATURES_NEEDING_HTML = [
+    "Favicon", "RequestURL", "AnchorURL", "LinksInScriptTags", 
+    "ServerFormHandler", "InfoEmail", "StatusBarCust", 
+    "DisableRightClick", "UsingPopupWindow", "IframeRedirection", 
+    "LinksPointingToPage"
+]
+
+# Features that require WHOIS registration data
+FEATURES_NEEDING_WHOIS = [
+    "DomainRegLen", "AbnormalURL", "AgeofDomain", "DNSRecording"
+]
