@@ -59,6 +59,7 @@ def retrain_model():
         pickle.dump(features_used, f)
         
     print(f"SUCCESS: New model saved to {model_file}")
+    # just to make sure the feature passed to model in same order as trained
     print(f"SUCCESS: Feature metadata saved to {meta_file}")
 
 if __name__ == "__main__":

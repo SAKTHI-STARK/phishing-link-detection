@@ -4,7 +4,10 @@ import warnings
 import logging
 import os
 import uvicorn
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import HTMLResponse
+from fastapi.templating import Jinja2Templates
 from urllib.parse import urlparse
 from pydantic import BaseModel
 from feature import FeatureExtraction
@@ -42,12 +45,15 @@ def load_model_assets():
 
 load_model_assets()
 
+# Mount static files
+os.makedirs("static", exist_ok=True)
+phisingServer.mount("/static", StaticFiles(directory="static"), name="static")
+templates = Jinja2Templates(directory="templates")
 
-@phisingServer.get("/")
-async def root():
-    return {
-        "message": "Phishing Link Detection API is running.",
-    }
+
+@phisingServer.get("/", response_class=HTMLResponse)
+async def root(request: Request):
+    return templates.TemplateResponse("index.html", {"request": request})
 
 
 @phisingServer.post("/analyze")

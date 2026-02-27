@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PhishShield | Advanced Link Analysis</title>
+    <meta name="description" content="State-of-the-art phishing detection using machine learning. Protect yourself from malicious links instantly.">
+    <link rel="stylesheet" href="/static/style.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+</head>
+<body>
+    <div class="background-blobs">
+        <div class="blob blob-1"></div>
+        <div class="blob blob-2"></div>
+        <div class="blob blob-3"></div>
+    </div>
+
+    <main class="container">
+        <header class="hero">
+            <div class="logo">
+                <i class="fas fa-shield-halved"></i>
+                <span>PhishShield</span>
+            </div>
+            <h1>Is that link <span class="gradient-text">Safe?</span></h1>
+            <p>Our advanced XGBoost model analyzes dozens of features in real-time to detect sophisticated phishing attempts before they catch you.</p>
+        </header>
+
+        <section class="search-section">
+            <div class="input-card">
+                <div class="input-wrapper">
+                    <i class="fas fa-link link-icon"></i>
+                    <input type="text" id="urlInput" placeholder="Paste URL here (e.g., https://example.com)" autocomplete="off">
+                    <button id="analyzeBtn">
+                        <span class="btn-text">Analyze</span>
+                        <i class="fas fa-arrow-right"></i>
+                    </button>
+                </div>
+                <div id="loading" class="hidden">
+                    <div class="spinner"></div>
+                    <span>Sticking the bait... identifying patterns...</span>
+                </div>
+            </div>
+        </section>
+
+        <section id="resultSection" class="result-section hidden">
+            <div class="result-card">
+                <div class="result-header">
+                    <div id="statusIcon" class="status-icon"></div>
+                    <div class="status-text">
+                        <h2 id="predictionResult">Analysis Result</h2>
+                        <p id="resultMessage">Waiting for input...</p>
+                    </div>
+                </div>
+
+                <div class="stats-grid">
+                    <div class="stat-item">
+                        <span class="stat-label">Safety Score</span>
+                        <div class="progress-bar-bg">
+                            <div id="safeScoreBar" class="progress-bar"></div>
+                        </div>
+                        <span id="safeScoreText" class="stat-value">0%</span>
+                    </div>
+                    <div class="stat-item">
+                        <span class="stat-label">SSL Status</span>
+                        <span id="sslInfo" class="stat-value">Checking...</span>
+                    </div>
+                </div>
+
+                <div class="features-list">
+                    <h3>Deep Scan Details</h3>
+                    <div class="features-grid" id="featuresSummary">
+                        <!-- Custom details can go here -->
+                        <div class="feature-tag"><i class="fas fa-check-circle"></i> Domain Security</div>
+                        <div class="feature-tag"><i class="fas fa-check-circle"></i> URL Pattern</div>
+                        <div class="feature-tag"><i class="fas fa-check-circle"></i> Content Integrity</div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <footer>
+            <div class="footer-content">
+                <p>&copy; 2026 PhishShield AI. Built with XGBoost & FastAPI.</p>
+                <div class="footer-links">
+                    <a href="#"><i class="fab fa-github"></i> Source</a>
+                    <a href="#"><i class="fas fa-book"></i> Docs</a>
+                </div>
+            </div>
+        </footer>
+    </main>
+
+    <script src="/static/app.js"></script>
+</body>
+</html>
