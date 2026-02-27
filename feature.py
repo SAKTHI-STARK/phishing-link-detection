@@ -115,15 +115,19 @@ class FeatureExtraction:
     # --- Feature implementation methods ---
     def UsingIp(self) -> int:
         try:
-            ipaddress.ip_address(self.url) # https://docs.python.org/3/library/ipaddress.html
-            return -1
-        except: return 1
+            hostname = self.urlparse.hostname
+            if not hostname:
+                return 1
+            ipaddress.ip_address(hostname)
+            return -1 # It IS an IP address (Phishing)
+        except: 
+            return 1 # Not an IP (Legitimate domain)
 
     def longUrl(self) -> int:
         length = len(self.url)
         if length < 54: return 1 # positive
         elif 54 <= length <= 75: return 0 # suspicious
-        return -1 # safe
+        return -1 # phishing (long URL)
 
     def shortUrl(self)  -> int:
         """Return -1 if shortened URL (phishing), 1 if legitimate"""
@@ -220,7 +224,8 @@ class FeatureExtraction:
                     src = element['src']
                     if self.domain in src or self.url in src: success += 1
                     total += 1
-            percentage = (success / total * 100) if total > 0 else 0
+            if total == 0: return 0 # Suspicious if no resources found
+            percentage = (success / total * 100)
             if percentage < 22: return 1
             elif 22 <= percentage < 61: return 0
             return -1
@@ -235,7 +240,8 @@ class FeatureExtraction:
                 if '#' in href or 'javascript' in href or 'mailto:' in href or (self.domain not in href and self.url not in href):
                     unsafe += 1
                 total += 1
-            percentage = (unsafe / total * 100) if total > 0 else 0
+            if total == 0: return 0 # Suspicious if no links found
+            percentage = (unsafe / total * 100)
             if percentage < 31: return 1
             elif 31 <= percentage < 67: return 0
             return -1
@@ -250,7 +256,8 @@ class FeatureExtraction:
                 if href:
                     if self.domain in href or self.url in href: internal += 1
                     total += 1
-            percentage = (internal / total * 100) if total > 0 else 0
+            if total == 0: return 0
+            percentage = (internal / total * 100)
             if percentage < 17: return 1
             elif 17 <= percentage < 81: return 0
             return -1
@@ -326,7 +333,7 @@ class FeatureExtraction:
     def GoogleIndex(self) -> int:
         try:
             return 1 if list(search(self.url, num=1)) else -1
-        except: return 1
+        except: return -1
 
     def LinksPointingToPage(self) -> int:
         try:
@@ -343,4 +350,4 @@ class FeatureExtraction:
             ip = socket.gethostbyname(self.domain)
             bad_ip = re.search(r'146\.112\.61\.108|216\.218\.185\.162', ip)
             return -1 if bad_url or bad_ip else 1
-        except: return 1
+        except: return -1

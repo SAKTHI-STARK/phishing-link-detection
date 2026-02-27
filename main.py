@@ -96,14 +96,26 @@ async def analyze(entry: URLEntry):
         else:
             ssl_info = "No SSL (Plain HTTP)"
 
+        # Prepare feature breakdown
+        feature_results = {}
+        for name, value in obj.features_dict.items():
+            if value == 1:
+                status = "Pass"
+            elif value == 0:
+                status = "Suspicious"
+            else:
+                status = "Fail"
+            feature_results[name] = status
+
         return {
             "url": url,
             "is_safe": is_safe,
+            "prediction": "Safe" if is_safe else "Phishing",
             "safe_score": round(safe_prob, 4),
             "phishing_score": round(phishing_prob, 4),
-            "prediction": "Safe" if is_safe else "Phishing",
             "ssl_info": ssl_info,
-            "message": msg
+            "message": msg,
+            "feature_breakdown": feature_results
         }
 
     except Exception as e:
