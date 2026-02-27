@@ -22,16 +22,16 @@ class URLEntry(BaseModel):
 model_path = os.path.join(os.path.dirname(__file__), "pickle", "model.pkl")
 meta_path = os.path.join(os.path.dirname(__file__), "pickle", "features_metadata.pkl")
 
-gbc = None
+model = None
 features_used = None
 
 
 def load_model_assets():
-    global gbc, features_used
+    global model, features_used
 
     if os.path.exists(model_path):
         with open(model_path, "rb") as f:
-            gbc = pickle.load(f)
+            model = pickle.load(f)
         logger.info("Model loaded")
 
     if os.path.exists(meta_path):
@@ -59,7 +59,7 @@ async def analyze(entry: URLEntry):
             detail="Missing protocol. Please provide a full URL starting with 'http://' or 'https://'."
         )
 
-    if gbc is None:
+    if model is None:
         raise HTTPException(status_code=503, detail="Model not loaded on server.")
 
     try:
@@ -70,8 +70,8 @@ async def analyze(entry: URLEntry):
 
         x = np.array(features).reshape(1, -1)
 
-        y_pred = gbc.predict(x)[0]
-        y_proba = gbc.predict_proba(x)[0]
+        y_pred = model.predict(x)[0]
+        y_proba = model.predict_proba(x)[0]
 
         safe_prob = float(y_proba[1])
         phishing_prob = float(y_proba[0])
