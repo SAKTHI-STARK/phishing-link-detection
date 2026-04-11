@@ -9,7 +9,7 @@ def retrain_model():
     print("--- Retraining Model with XGBoost ---")
     
     # 1. Load Data
-    data_path = "phishing dataset.csv"
+    data_path = "phishing_augmented_balanced.csv"
     if not os.path.exists(data_path):
         print(f"Error: {data_path} not found.")
         return
