@@ -103,6 +103,16 @@ async def analyze(entry: URLEntry):
             red_flags.append("Site unreachable")
         if obj.ssl_error:
             red_flags.append("SSL certificate error")
+            
+        # Domain Trust Red Flags
+        whois_unavailable = (fd.get("DomainRegLen") == 0 and fd.get("AgeofDomain") == 0)
+        not_indexed = (fd.get("GoogleIndex") == -1)
+        if whois_unavailable:
+            red_flags.append("WHOIS data unavailable")
+        if not_indexed:
+            red_flags.append("Page not indexed by Google")
+        if fd.get("Favicon") == -1:
+            red_flags.append("Favicon loaded from external domain")
 
         # If multiple strong red flags exist, override the model
         if len(red_flags) >= 3 and is_safe:
@@ -116,6 +126,12 @@ async def analyze(entry: URLEntry):
             phishing_prob = max(phishing_prob, 0.75)
             safe_prob = 1.0 - phishing_prob
             logger.info(f"Rule override (IP+flag): {red_flags}")
+        elif whois_unavailable and not_indexed and is_safe:
+            # Missing WHOIS + Not Indexed is a huge indicator of a new phishing site
+            is_safe = False
+            phishing_prob = max(phishing_prob, 0.90)
+            safe_prob = 1.0 - phishing_prob
+            logger.info(f"Rule override (Critical Domain Trust Failures): {red_flags}")
 
         if is_safe:
             msg = f"It is {safe_prob*100:.2f}% safe to go."
@@ -132,6 +148,46 @@ async def analyze(entry: URLEntry):
         else:
             ssl_info = "No SSL (Plain HTTP)"
 
+        # Build per-feature detail for frontend debugging
+        feature_labels = {
+            "UsingIP": "Using IP Address",
+            "LongURL": "URL Length",
+            "ShortURL": "URL Shortener",
+            "Symbol@": "@ Symbol in URL",
+            "Redirecting//": "Double-Slash Redirect",
+            "PrefixSuffix-": "Prefix/Suffix in Domain",
+            "SubDomains": "Sub-Domain Count",
+            "HTTPS": "HTTPS / SSL Certificate",
+            "DomainRegLen": "Domain Registration Length",
+            "Favicon": "Favicon Source",
+            "NonStdPort": "Non-Standard Port",
+            "HTTPSDomainURL": "HTTPS Token in Domain",
+            "RequestURL": "External Request Resources",
+            "AnchorURL": "Anchor URL Analysis",
+            "LinksInScriptTags": "Links in Script Tags",
+            "ServerFormHandler": "Server Form Handler",
+            "InfoEmail": "Mail-to Link",
+            "AbnormalURL": "Abnormal URL vs WHOIS",
+            "WebsiteForwarding": "Website Forwarding",
+            "StatusBarCust": "Status Bar Customization",
+            "DisableRightClick": "Right-Click Disabled",
+            "UsingPopupWindow": "Pop-up Window",
+            "IframeRedirection": "Iframe Redirection",
+            "AgeofDomain": "Age of Domain",
+            "DNSRecording": "DNS Record",
+            "PageRank": "Page Rank",
+            "GoogleIndex": "Google Index",
+            "LinksPointingToPage": "Links Pointing to Page",
+            "StatsReport": "Statistical Report",
+        }
+
+        features_detail = {}
+        for fname, fval in fd.items():
+            features_detail[fname] = {
+                "value": fval,
+                "label": feature_labels.get(fname, fname),
+            }
+
         return {
             "url": url,
             "is_safe": is_safe,
@@ -140,7 +196,8 @@ async def analyze(entry: URLEntry):
             "prediction": "Safe" if is_safe else "Phishing",
             "ssl_info": ssl_info,
             "red_flags": red_flags if red_flags else None,
-            "message": msg
+            "message": msg,
+            "features_detail": features_detail
         }
 
     except Exception as e:
