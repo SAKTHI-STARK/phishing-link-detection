@@ -118,8 +118,6 @@ class FeatureExtraction:
         
         return [self.features_dict.get(name, -1) for name in feature_names]
 
-
-
     # --- Feature implementation methods ---
     def UsingIp(self) -> int:
         try:
@@ -346,8 +344,6 @@ class FeatureExtraction:
 
     def DNSRecording(self) -> int:
         return self.AgeofDomain()
-
-
 
     def PageRank(self) -> int:
         try:

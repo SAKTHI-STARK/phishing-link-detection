@@ -65,10 +65,7 @@ async def analyze(entry: URLEntry):
 
     parsed_url = urlparse(url)
     if parsed_url.scheme not in ["http", "https"]:
-        raise HTTPException(
-            status_code=400, 
-            detail="Invalid protocol. Please provide a full URL starting with 'http://' or 'https://'."
-        )
+        raise HTTPException(status_code=400, detail="Invalid protocol. Please provide a full URL starting with 'http://' or 'https://'.")
 
     if model is None:
         raise HTTPException(status_code=503, detail="Model not loaded on server.")
