@@ -1,13 +1,23 @@
+import ssl
 import ipaddress
 import re
-import urllib.request
-from bs4 import BeautifulSoup
 import socket
 import requests
-from googlesearch import search
 import whois
+import logging
+from bs4 import BeautifulSoup
+from googlesearch import search
 from datetime import date
 from urllib.parse import urlparse
+
+import asyncio
+from config import (
+    SHORTENER_REGEX, FEATURE_METHODS, DEFAULT_FEATURE_NAMES, 
+    FEATURES_NEEDING_HTML, FEATURES_NEEDING_WHOIS
+)
+
+# Configure logging
+logger = logging.getLogger(__name__)
 
 class FeatureExtraction:
     def __init__(self, url):
@@ -17,102 +27,186 @@ class FeatureExtraction:
         self.urlparse = None
         self.response = None
         self.soup = None
-        self.features = []
+        self.features_dict = {}
+        self.ssl_error = False
+        self.connection_failed = False
 
-        try:
-            self.response = requests.get(url, timeout=5)
-            self.soup = BeautifulSoup(self.response.text, 'html.parser')
-        except:
-            pass
+        # Events for dependency synchronization
+        self._html_event = asyncio.Event()
+        self._whois_event = asyncio.Event()
 
         try:
             self.urlparse = urlparse(url)
             self.domain = self.urlparse.netloc
-        except:
-            pass
+        except Exception as e:
+            logger.debug(f"Failed to parse URL {url}: {e}")
 
+    async def _setup_html(self):
+        """Fetch page content in parallel."""
+        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'}
         try:
-            self.whois_response = whois.whois(self.domain)
-        except:
-            pass
+            # Use to_thread for blocking requests call
+            resp = await asyncio.to_thread(requests.get, self.url, timeout=5, headers=headers)
+            self.response = resp
+            self.soup = BeautifulSoup(self.response.text, 'html.parser')
+        except requests.exceptions.SSLError:
+            self.ssl_error = True
+        except Exception:
+            self.connection_failed = True
+        finally:
+            self._html_event.set()
 
-        self.extract_features()
-
-    def extract_features(self):
-        self.features.extend([
-            self.UsingIp(),
-            self.longUrl(),
-            self.shortUrl(),
-            self.symbol(),
-            self.redirecting(),
-            self.prefixSuffix(),
-            self.SubDomains(),
-            self.Hppts(),
-            self.DomainRegLen(),
-            self.Favicon(),
-            self.NonStdPort(),
-            self.HTTPSDomainURL(),
-            self.RequestURL(),
-            self.AnchorURL(),
-            self.LinksInScriptTags(),
-            self.ServerFormHandler(),
-            self.InfoEmail(),
-            self.AbnormalURL(),
-            self.WebsiteForwarding(),
-            self.StatusBarCust(),
-            self.DisableRightClick(),
-            self.UsingPopupWindow(),
-            self.IframeRedirection(),
-            self.AgeofDomain(),
-            self.DNSRecording(),
-            self.WebsiteTraffic(),
-            self.PageRank(),
-            self.GoogleIndex(),
-            self.LinksPointingToPage(),
-            self.StatsReport()
-        ])
-
-    def UsingIp(self):
+    async def _setup_whois(self):
+        """Fetch WHOIS data in parallel."""
         try:
-            ipaddress.ip_address(self.url)
-            return -1
-        except:
+            self.whois_response = await asyncio.to_thread(whois.whois, self.domain)
+        except Exception:
+            pass
+        finally:
+            self._whois_event.set()
+
+    async def _run_check(self, name, method_name):
+        """Run a single feature check, waiting for dependencies if necessary."""
+        try:
+            if name in FEATURES_NEEDING_HTML:
+                await self._html_event.wait()
+                # If connection failed entirely, HTML-dependent features are phishing signals
+                if self.connection_failed and not self.response:
+                    self.features_dict[name] = -1
+                    return
+            elif name in FEATURES_NEEDING_WHOIS:
+                await self._whois_event.wait()
+                # If WHOIS failed (e.g. IP address), domain-based features are phishing signals
+                if not self.whois_response:
+                    self.features_dict[name] = -1
+                    return
+            
+            # Run the actual sync method in a separate thread to keep the event loop responsive
+            method = getattr(self, method_name)
+            self.features_dict[name] = await asyncio.to_thread(method)
+        except Exception:
+            self.features_dict[name] = -1
+
+    async def extract(self):
+        """Coordinate parallel execution of setup tasks and all feature checks."""
+        # 1. Start setup tasks
+        setup_tasks = [
+            asyncio.create_task(self._setup_html()),
+            asyncio.create_task(self._setup_whois())
+        ]
+
+        # 2. Start all feature checks
+        check_tasks = [
+            self._run_check(name, method_name) 
+            for name, method_name in FEATURE_METHODS.items()
+        ]
+
+        # 3. Wait for everything to complete
+        await asyncio.gather(*setup_tasks, *check_tasks)
+
+    def extract_all_to_dict(self):
+        """Legacy method - now triggers a warning or should be avoided in async flow."""
+        pass
+
+    def getFeaturesList(self, feature_names=None):
+        """
+        Returns features in the order specified by feature_names.
+        If feature_names is None, it defaults to the original 30 features.
+        """
+        if feature_names is None:
+            feature_names = DEFAULT_FEATURE_NAMES
+        
+        return [self.features_dict.get(name, -1) for name in feature_names]
+
+    # --- Feature implementation methods ---
+    def UsingIp(self) -> int:
+        try:
+            hostname = self.urlparse.hostname
+            if hostname:
+                ipaddress.ip_address(hostname)
+                return -1  # URL uses an IP address = phishing indicator
             return 1
+        except ValueError:
+            return 1  # not an IP address = legitimate
 
-    def longUrl(self):
+    def longUrl(self) -> int:
         length = len(self.url)
-        if length < 54:
-            return 1
-        elif 54 <= length <= 75:
-            return 0
-        else:
-            return -1
+        if length < 54: return 1 # positive
+        elif 54 <= length <= 75: return 0 # suspicious
+        return -1 # safe
 
-    def shortUrl(self):
-        shorteners = r'(bit\.ly|goo\.gl|shorte\.st|tinyurl|ow\.ly|t\.co|tr\.im|is\.gd|buff\.ly|adf\.ly|bit\.do|cutt\.ly|tiny\.cc)'
-        return -1 if re.search(shorteners, self.url) else 1
+    def shortUrl(self)  -> int:
+        """Return -1 if shortened URL (phishing), 1 if legitimate"""
+        return -1 if SHORTENER_REGEX.search(self.url) else 1
 
-    def symbol(self):
+    def symbol(self) -> int:
         return -1 if "@" in self.url else 1
 
-    def redirecting(self):
+    def redirecting(self) -> int:
         return -1 if self.url.rfind('//') > 6 else 1
 
-    def prefixSuffix(self):
+    def prefixSuffix(self) -> int:
         return -1 if '-' in self.domain else 1
 
-    def SubDomains(self):
-        dots = self.domain.split('.')
-        if len(dots) <= 2:
-            return 1
-        elif len(dots) == 3:
+    def SubDomains(self) -> int:
+        try:
+            hostname = self.urlparse.hostname
+            if not hostname:
+                return -1
+            # If the hostname is an IP address, it's already suspicious
+            try:
+                ipaddress.ip_address(hostname)
+                return -1  # IP address used instead of domain
+            except ValueError:
+                pass
+            # Count dots for domain-based URLs
+            dots = hostname.split('.')
+            if len(dots) <= 2: return 1
+            elif len(dots) == 3: return 0
+            return -1
+        except: return -1
+
+    def Hppts(self) -> int:
+        """
+        Returns:
+        1  = Trusted CA certificate
+        0  = Self-signed certificate
+        -1 = No HTTPS
+        -2 = Connection failed
+        """
+        try:
+            parsed = urlparse(self.url)
+
+            if parsed.scheme != "https":
+                return -1
+
+            hostname = parsed.hostname
+
+            if not hostname:
+                return -2
+
+            ctx = ssl.create_default_context()
+
+            with socket.create_connection((hostname, 443), timeout=5) as sock:
+                with ctx.wrap_socket(sock, server_hostname=hostname) as ssock:
+                    cert = ssock.getpeercert()
+
+                    issuer = cert.get("issuer")
+                    subject = cert.get("subject")
+
+                    if issuer == subject:
+                        return 0   # self-signed
+                    else:
+                        return 1   # trusted CA
+
+        except ssl.SSLError:
             return 0
-        return -1
 
-    def Hppts(self):
-        return 1 if self.urlparse and self.urlparse.scheme == 'https' else -1
+        except Exception:
+            return -2
 
-    def DomainRegLen(self):
+    def DomainRegLen(self) -> int:
+        # check if domain is registered for less than 1 year
         try:
             exp = self.whois_response.expiration_date
             create = self.whois_response.creation_date
@@ -120,45 +214,46 @@ class FeatureExtraction:
             if isinstance(create, list): create = create[0]
             age = (exp.year - create.year) * 12 + (exp.month - create.month)
             return 1 if age >= 12 else -1
-        except:
-            return -1
+        except: return 0
 
-    def Favicon(self):
+    def Favicon(self) -> int:
         try:
+            if not self.soup: return 0
             for link in self.soup.find_all('link', href=True):
-                if self.domain in link['href']:
-                    return 1
-            return -1
-        except:
-            return -1
+                if 'icon' in (link.get('rel', [''])[0] if isinstance(link.get('rel'), list) else link.get('rel', '')).lower():
+                    if self.domain in link['href']:
+                        return 1  # favicon loaded from same domain
+                    else:
+                        return -1  # favicon loaded from external domain
+            return 0  # no favicon found
+        except: return 0
 
-    def NonStdPort(self):
+    def NonStdPort(self) -> int:
         return -1 if ':' in self.domain else 1
 
-    def HTTPSDomainURL(self):
+    def HTTPSDomainURL(self) -> int:
+        # http://https-paypal-login.com return -1
         return -1 if 'https' in self.domain else 1
 
-    def RequestURL(self):
+    def RequestURL(self) -> int:
         try:
+            if not self.soup: return 0
             total, success = 0, 0
             for tag in ['img', 'audio', 'embed', 'iframe']:
                 for element in self.soup.find_all(tag, src=True):
                     src = element['src']
-                    if self.domain in src or self.url in src:
-                        success += 1
+                    if self.domain in src or self.url in src: success += 1
                     total += 1
-            percentage = (success / total * 100) if total > 0 else 0
-            if percentage < 22:
-                return 1
-            elif 22 <= percentage < 61:
-                return 0
-            else:
-                return -1
-        except:
-            return -1
+            if total == 0: return 1  # no external resources
+            percentage = (success / total * 100)
+            if percentage >= 61: return 1    # most resources from same domain = safe
+            elif percentage >= 22: return 0  # mixed
+            return -1                        # most resources from external = phishing
+        except: return 0
 
-    def AnchorURL(self):
+    def AnchorURL(self) -> int:
         try:
+            if not self.soup: return 0
             total, unsafe = 0, 0
             for a in self.soup.find_all('a', href=True):
                 href = a['href'].lower()
@@ -166,135 +261,116 @@ class FeatureExtraction:
                     unsafe += 1
                 total += 1
             percentage = (unsafe / total * 100) if total > 0 else 0
-            if percentage < 31:
-                return 1
-            elif 31 <= percentage < 67:
-                return 0
-            else:
-                return -1
-        except:
+            if percentage < 31: return 1
+            elif 31 <= percentage < 67: return 0
             return -1
+        except: return 0
 
-    def LinksInScriptTags(self):
+    def LinksInScriptTags(self) -> int:
         try:
+            if not self.soup: return 0
             total, internal = 0, 0
             for tag in self.soup.find_all(['link', 'script']):
                 href = tag.get('href') or tag.get('src')
                 if href:
-                    if self.domain in href or self.url in href:
-                        internal += 1
+                    if self.domain in href or self.url in href: internal += 1
                     total += 1
-            percentage = (internal / total * 100) if total > 0 else 0
-            if percentage < 17:
-                return 1
-            elif 17 <= percentage < 81:
-                return 0
-            else:
-                return -1
-        except:
-            return -1
+            if total == 0: return 1
+            percentage = (internal / total * 100)
+            if percentage >= 81: return 1     # most scripts from same domain
+            elif percentage >= 17: return 0   # mixed
+            return -1                         # mostly external scripts
+        except: return 0
 
-    def ServerFormHandler(self):
+    def ServerFormHandler(self) -> int:
         try:
+            if not self.soup: return 0
             forms = self.soup.find_all('form', action=True)
-            if not forms:
-                return 1
+            if not forms: return 1
             for form in forms:
                 action = form['action']
-                if action in ["", "about:blank"]:
-                    return -1
-                elif self.domain not in action:
-                    return 0
+                if action in ["", "about:blank"]: return -1
+                elif self.domain not in action: return 0
             return 1
-        except:
-            return -1
+        except: return 0
 
-    def InfoEmail(self):
-        return -1 if re.search(r'mailto:', self.response.text if self.response else "") else 1
+    def InfoEmail(self) -> int:
+        try: return -1 if re.search(r'mailto:', self.response.text if self.response else "") else 1
+        except: return 1
 
-    def AbnormalURL(self):
-        return -1 if self.whois_response and self.whois_response.domain_name not in self.url else 1
-
-    def WebsiteForwarding(self):
+    def AbnormalURL(self) -> int:
         try:
-            redirects = len(self.response.history)
-            if redirects <= 1:
-                return 1
-            elif redirects <= 4:
+            if not self.whois_response or not self.whois_response.domain_name:
                 return 0
-            else:
-                return -1
-        except:
+            domain_name = self.whois_response.domain_name
+            if isinstance(domain_name, list):
+                domain_name = domain_name[0]
+            return 1 if domain_name.lower() in self.url.lower() else -1
+        except: return 0
+
+    def WebsiteForwarding(self) -> int:
+        try:
+            if not self.response: return 0
+            redirects = len(self.response.history)
+            if redirects <= 1: return 1
+            elif redirects <= 4: return 0
             return -1
+        except: return 0
 
-    def StatusBarCust(self):
-        return -1 if re.search("onmouseover=.*status", self.response.text if self.response else "") else 1
+    def StatusBarCust(self) -> int:
+        try: return -1 if re.search("onmouseover=.*status", self.response.text if self.response else "") else 1
+        except: return 1
 
-    def DisableRightClick(self):
-        return -1 if re.search(r'event.button ?== ?2', self.response.text if self.response else "") else 1
+    def DisableRightClick(self) -> int:
+        try: return -1 if re.search(r'event.button ?== ?2', self.response.text if self.response else "") else 1
+        except: return 1
 
-    def UsingPopupWindow(self):
-        return -1 if re.search(r'alert\(', self.response.text if self.response else "") else 1
+    def UsingPopupWindow(self) -> int:
+        try: return -1 if re.search(r'alert\(', self.response.text if self.response else "") else 1
+        except: return 1
 
-    def IframeRedirection(self):
-        return -1 if re.search(r'<iframe', self.response.text if self.response else "") else 1
+    def IframeRedirection(self) -> int:
+        try: return -1 if re.search(r'<iframe', self.response.text if self.response else "") else 1
+        except: return 0
 
-    def AgeofDomain(self):
+    def AgeofDomain(self) -> int:
         try:
             creation = self.whois_response.creation_date
-            if isinstance(creation, list):
-                creation = creation[0]
+            if isinstance(creation, list): creation = creation[0]
             today = date.today()
             age = (today.year - creation.year) * 12 + (today.month - creation.month)
             return 1 if age >= 6 else -1
-        except:
-            return -1
+        except: return 0
 
-    def DNSRecording(self):
+    def DNSRecording(self) -> int:
         return self.AgeofDomain()
 
-    def WebsiteTraffic(self):
+    def PageRank(self) -> int:
         try:
-            with urllib.request.urlopen("http://data.alexa.com/data?cli=10&dat=s&url=" + self.url) as u:
-                soup = BeautifulSoup(u, 'xml')
-                rank = soup.find("REACH")['RANK']
-                return 1 if int(rank) < 100000 else 0
-        except:
-            return -1
-
-    def PageRank(self):
-        try:
-            response = requests.post("https://www.checkpagerank.net/index.php", {"name": self.domain})
+            response = requests.post("https://www.checkpagerank.net/index.php", {"name": self.domain}, timeout=5)
             rank = int(re.search(r"Global Rank: ([0-9]+)", response.text).group(1))
             return 1 if rank < 100000 else -1
-        except:
-            return -1
+        except: return 0
 
-    def GoogleIndex(self):
+    def GoogleIndex(self) -> int:
         try:
-            return 1 if list(search(self.url, num=1)) else -1
-        except:
-            return 1
+            results = list(search(self.url, num_results=1))
+            return 1 if results else -1
+        except: return 0
 
-    def LinksPointingToPage(self):
+    def LinksPointingToPage(self) -> int:
         try:
-            links = re.findall(r"<a href=", self.response.text if self.response else "")
-            if len(links) == 0:
-                return 1
-            elif len(links) <= 2:
-                return 0
+            if not self.response: return 0
+            links = re.findall(r"<a href=", self.response.text)
+            if len(links) == 0: return 1
+            elif len(links) <= 2: return 0
             return -1
-        except:
-            return -1
+        except: return 0
 
-    def StatsReport(self):
+    def StatsReport(self) -> int:
         try:
             bad_url = re.search(r'at\.ua|usa\.cc|96\.lt|ow\.ly', self.url)
             ip = socket.gethostbyname(self.domain)
             bad_ip = re.search(r'146\.112\.61\.108|216\.218\.185\.162', ip)
             return -1 if bad_url or bad_ip else 1
-        except:
-            return 1
-
-    def getFeaturesList(self):
-        return self.features
+        except: return 1
