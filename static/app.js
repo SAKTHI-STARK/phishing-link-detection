@@ -68,7 +68,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         // Update Colors and Icons based on Safety
         if (isSafe) {
-            statusIcon.innerHTML = '<i class="fas fa-check-shield"></i>';
+            statusIcon.innerHTML = '<i class="fas fa-shield-check"></i>';
             statusIcon.className = 'status-icon status-safe';
             predictionResult.style.color = 'var(--success-color)';
             safeScoreBar.style.background = 'var(--success-color)';

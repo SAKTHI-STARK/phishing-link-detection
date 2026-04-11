@@ -53,12 +53,15 @@ templates = Jinja2Templates(directory="templates")
 
 @phisingServer.get("/", response_class=HTMLResponse)
 async def root(request: Request):
-    return templates.TemplateResponse("index.html", {"request": request})
+    return templates.TemplateResponse(request=request, name="index.html")
 
 
 @phisingServer.post("/analyze")
 async def analyze(entry: URLEntry):
-    url = entry.url
+    url = entry.url.strip()
+
+    if not url.startswith(("http://", "https://")):
+        url = "http://" + url
 
     parsed_url = urlparse(url)
     if parsed_url.scheme not in ["http", "https"]:
@@ -86,13 +89,43 @@ async def analyze(entry: URLEntry):
         phishing_prob = float(y_proba[0])
 
         is_safe = bool(y_pred == 1)
-        
+
+        # --- Rule-based overrides for obvious phishing patterns ---
+        fd = obj.features_dict
+        red_flags = []
+
+        if fd.get("UsingIP") == -1:
+            red_flags.append("IP address instead of domain")
+        if fd.get("NonStdPort") == -1:
+            red_flags.append("Non-standard port")
+        if fd.get("HTTPS") in (-1, -2):
+            red_flags.append("No HTTPS / SSL issue")
+        if fd.get("PrefixSuffix-") == -1:
+            red_flags.append("Suspicious prefix/suffix in domain")
+        if obj.connection_failed:
+            red_flags.append("Site unreachable")
+        if obj.ssl_error:
+            red_flags.append("SSL certificate error")
+
+        # If multiple strong red flags exist, override the model
+        if len(red_flags) >= 3 and is_safe:
+            is_safe = False
+            phishing_prob = max(phishing_prob, 0.85)
+            safe_prob = 1.0 - phishing_prob
+            logger.info(f"Rule override: {red_flags}")
+        elif len(red_flags) >= 2 and fd.get("UsingIP") == -1 and is_safe:
+            # IP + any other red flag = override
+            is_safe = False
+            phishing_prob = max(phishing_prob, 0.75)
+            safe_prob = 1.0 - phishing_prob
+            logger.info(f"Rule override (IP+flag): {red_flags}")
+
         if is_safe:
             msg = f"It is {safe_prob*100:.2f}% safe to go."
         else:
             msg = f"It is {phishing_prob*100:.2f}% unsafe (phishing detected)."
 
-        ssl_status = obj.features_dict.get("HTTPS", -1)
+        ssl_status = fd.get("HTTPS", -1)
         if ssl_status == 1:
             ssl_info = "Trusted CA (Verified)"
         elif ssl_status == 0:
@@ -109,6 +142,7 @@ async def analyze(entry: URLEntry):
             "phishing_score": round(phishing_prob, 4),
             "prediction": "Safe" if is_safe else "Phishing",
             "ssl_info": ssl_info,
+            "red_flags": red_flags if red_flags else None,
             "message": msg
         }
 
@@ -117,4 +151,4 @@ async def analyze(entry: URLEntry):
         raise HTTPException(status_code=500, detail=str(e))
 
 if __name__ == "__main__":
-    uvicorn.run(phisingServer, host="0.0.0.0", port=8000)
+    uvicorn.run(phisingServer, host="127.0.0.1", port=8000)

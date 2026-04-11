@@ -19,7 +19,7 @@ def retrain_model():
     # 2. Define Features to drop
     # 'Index' is always dropped.
     # 'WebsiteTraffic' is dropped because the Alexa API is retired.
-    features_to_drop = ['Index', 'WebsiteTraffic'] 
+    features_to_drop = ['Index'] 
     
     print(f"Dropping unreliable features: {features_to_drop}")
     X = df.drop(features_to_drop + ['class'], axis=1)
@@ -35,11 +35,28 @@ def retrain_model():
     print(f"Using {len(features_used)} features for training.")
     
     # 3. Split Data
-    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42, shuffle=True, stratify=y)
+    # print("Training set class count:")
+    # print(y_train.value_counts())
+
+    # # Print class count in testing set
+    # print("\nTesting set class count:")
+    # print(y_test.value_counts())
     
     # 4. Train Model
     print("Training XGBClassifier...")
-    xgb = XGBClassifier(max_depth=4, learning_rate=0.7, n_estimators=100, use_label_encoder=False, eval_metric='logloss')
+    xgb = XGBClassifier(
+        n_estimators=500,
+        max_depth=6,
+        learning_rate=0.03,
+        subsample=0.8,
+        colsample_bytree=0.8,
+        gamma=0.1,
+        reg_alpha=0.1,
+        reg_lambda=1,
+        random_state=42,
+        eval_metric='logloss'
+    )
     xgb.fit(X_train, y_train)
     
     # 5. Evaluate

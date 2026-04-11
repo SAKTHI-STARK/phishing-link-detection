@@ -39,7 +39,6 @@ FEATURE_METHODS = {
     "IframeRedirection": "IframeRedirection",
     "AgeofDomain": "AgeofDomain",
     "DNSRecording": "DNSRecording",
-    "WebsiteTraffic": "WebsiteTraffic",
     "PageRank": "PageRank",
     "GoogleIndex": "GoogleIndex",
     "LinksPointingToPage": "LinksPointingToPage",
@@ -53,7 +52,7 @@ DEFAULT_FEATURE_NAMES = [
     "LinksInScriptTags", "ServerFormHandler", "InfoEmail", "AbnormalURL",
     "WebsiteForwarding", "StatusBarCust", "DisableRightClick",
     "UsingPopupWindow", "IframeRedirection", "AgeofDomain",
-    "DNSRecording", "WebsiteTraffic", "PageRank", "GoogleIndex",
+    "DNSRecording", "PageRank", "GoogleIndex",
     "LinksPointingToPage", "StatsReport"
 ]
 

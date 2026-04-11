@@ -70,8 +70,16 @@ class FeatureExtraction:
         try:
             if name in FEATURES_NEEDING_HTML:
                 await self._html_event.wait()
+                # If connection failed entirely, HTML-dependent features are phishing signals
+                if self.connection_failed and not self.response:
+                    self.features_dict[name] = -1
+                    return
             elif name in FEATURES_NEEDING_WHOIS:
                 await self._whois_event.wait()
+                # If WHOIS failed (e.g. IP address), domain-based features are phishing signals
+                if not self.whois_response:
+                    self.features_dict[name] = -1
+                    return
             
             # Run the actual sync method in a separate thread to keep the event loop responsive
             method = getattr(self, method_name)
@@ -115,9 +123,13 @@ class FeatureExtraction:
     # --- Feature implementation methods ---
     def UsingIp(self) -> int:
         try:
-            ipaddress.ip_address(self.url) # https://docs.python.org/3/library/ipaddress.html
-            return -1
-        except: return 1
+            hostname = self.urlparse.hostname
+            if hostname:
+                ipaddress.ip_address(hostname)
+                return -1  # URL uses an IP address = phishing indicator
+            return 1
+        except ValueError:
+            return 1  # not an IP address = legitimate
 
     def longUrl(self) -> int:
         length = len(self.url)
@@ -140,7 +152,17 @@ class FeatureExtraction:
 
     def SubDomains(self) -> int:
         try:
-            dots = self.domain.split('.')
+            hostname = self.urlparse.hostname
+            if not hostname:
+                return -1
+            # If the hostname is an IP address, it's already suspicious
+            try:
+                ipaddress.ip_address(hostname)
+                return -1  # IP address used instead of domain
+            except ValueError:
+                pass
+            # Count dots for domain-based URLs
+            dots = hostname.split('.')
             if len(dots) <= 2: return 1
             elif len(dots) == 3: return 0
             return -1
@@ -194,15 +216,19 @@ class FeatureExtraction:
             if isinstance(create, list): create = create[0]
             age = (exp.year - create.year) * 12 + (exp.month - create.month)
             return 1 if age >= 12 else -1
-        except: return -1
+        except: return 0
 
     def Favicon(self) -> int:
         try:
-            if not self.soup: return -1
+            if not self.soup: return 0
             for link in self.soup.find_all('link', href=True):
-                if self.domain in link['href']: return 1
-            return -1
-        except: return -1
+                if 'icon' in (link.get('rel', [''])[0] if isinstance(link.get('rel'), list) else link.get('rel', '')).lower():
+                    if self.domain in link['href']:
+                        return 1  # favicon loaded from same domain
+                    else:
+                        return -1  # favicon loaded from external domain
+            return 0  # no favicon found
+        except: return 0
 
     def NonStdPort(self) -> int:
         return -1 if ':' in self.domain else 1
@@ -213,22 +239,23 @@ class FeatureExtraction:
 
     def RequestURL(self) -> int:
         try:
-            if not self.soup: return -1
+            if not self.soup: return 0
             total, success = 0, 0
             for tag in ['img', 'audio', 'embed', 'iframe']:
                 for element in self.soup.find_all(tag, src=True):
                     src = element['src']
                     if self.domain in src or self.url in src: success += 1
                     total += 1
-            percentage = (success / total * 100) if total > 0 else 0
-            if percentage < 22: return 1
-            elif 22 <= percentage < 61: return 0
-            return -1
-        except: return -1
+            if total == 0: return 1  # no external resources
+            percentage = (success / total * 100)
+            if percentage >= 61: return 1    # most resources from same domain = safe
+            elif percentage >= 22: return 0  # mixed
+            return -1                        # most resources from external = phishing
+        except: return 0
 
     def AnchorURL(self) -> int:
         try:
-            if not self.soup: return -1
+            if not self.soup: return 0
             total, unsafe = 0, 0
             for a in self.soup.find_all('a', href=True):
                 href = a['href'].lower()
@@ -239,26 +266,27 @@ class FeatureExtraction:
             if percentage < 31: return 1
             elif 31 <= percentage < 67: return 0
             return -1
-        except: return -1
+        except: return 0
 
     def LinksInScriptTags(self) -> int:
         try:
-            if not self.soup: return -1
+            if not self.soup: return 0
             total, internal = 0, 0
             for tag in self.soup.find_all(['link', 'script']):
                 href = tag.get('href') or tag.get('src')
                 if href:
                     if self.domain in href or self.url in href: internal += 1
                     total += 1
-            percentage = (internal / total * 100) if total > 0 else 0
-            if percentage < 17: return 1
-            elif 17 <= percentage < 81: return 0
-            return -1
-        except: return -1
+            if total == 0: return 1
+            percentage = (internal / total * 100)
+            if percentage >= 81: return 1     # most scripts from same domain
+            elif percentage >= 17: return 0   # mixed
+            return -1                         # mostly external scripts
+        except: return 0
 
     def ServerFormHandler(self) -> int:
         try:
-            if not self.soup: return -1
+            if not self.soup: return 0
             forms = self.soup.find_all('form', action=True)
             if not forms: return 1
             for form in forms:
@@ -266,24 +294,30 @@ class FeatureExtraction:
                 if action in ["", "about:blank"]: return -1
                 elif self.domain not in action: return 0
             return 1
-        except: return -1
+        except: return 0
 
     def InfoEmail(self) -> int:
         try: return -1 if re.search(r'mailto:', self.response.text if self.response else "") else 1
         except: return 1
 
     def AbnormalURL(self) -> int:
-        try: return -1 if self.whois_response and self.whois_response.domain_name not in self.url else 1
-        except: return 1
+        try:
+            if not self.whois_response or not self.whois_response.domain_name:
+                return 0
+            domain_name = self.whois_response.domain_name
+            if isinstance(domain_name, list):
+                domain_name = domain_name[0]
+            return 1 if domain_name.lower() in self.url.lower() else -1
+        except: return 0
 
     def WebsiteForwarding(self) -> int:
         try:
-            if not self.response: return -1
+            if not self.response: return 0
             redirects = len(self.response.history)
             if redirects <= 1: return 1
             elif redirects <= 4: return 0
             return -1
-        except: return -1
+        except: return 0
 
     def StatusBarCust(self) -> int:
         try: return -1 if re.search("onmouseover=.*status", self.response.text if self.response else "") else 1
@@ -299,7 +333,7 @@ class FeatureExtraction:
 
     def IframeRedirection(self) -> int:
         try: return -1 if re.search(r'<iframe', self.response.text if self.response else "") else 1
-        except: return 1
+        except: return 0
 
     def AgeofDomain(self) -> int:
         try:
@@ -308,34 +342,34 @@ class FeatureExtraction:
             today = date.today()
             age = (today.year - creation.year) * 12 + (today.month - creation.month)
             return 1 if age >= 6 else -1
-        except: return -1
+        except: return 0
 
     def DNSRecording(self) -> int:
         return self.AgeofDomain()
 
-    def WebsiteTraffic(self) -> int:
-        return -1 # Alexa API dead
+
 
     def PageRank(self) -> int:
         try:
             response = requests.post("https://www.checkpagerank.net/index.php", {"name": self.domain}, timeout=5)
             rank = int(re.search(r"Global Rank: ([0-9]+)", response.text).group(1))
             return 1 if rank < 100000 else -1
-        except: return -1
+        except: return 0
 
     def GoogleIndex(self) -> int:
         try:
-            return 1 if list(search(self.url, num=1)) else -1
-        except: return 1
+            results = list(search(self.url, num_results=1))
+            return 1 if results else -1
+        except: return 0
 
     def LinksPointingToPage(self) -> int:
         try:
-            if not self.response: return -1
+            if not self.response: return 0
             links = re.findall(r"<a href=", self.response.text)
             if len(links) == 0: return 1
             elif len(links) <= 2: return 0
             return -1
-        except: return -1
+        except: return 0
 
     def StatsReport(self) -> int:
         try:
