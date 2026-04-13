@@ -8,7 +8,7 @@ import logging
 from bs4 import BeautifulSoup
 from googlesearch import search
 from datetime import date
-from urllib.parse import urlparse
+from urllib.parse import urljoin, urlparse
 
 import asyncio
 from config import (
@@ -218,15 +218,30 @@ class FeatureExtraction:
 
     def Favicon(self) -> int:
         try:
-            if not self.soup: return 0
+            if not self.soup or not self.url:
+                return 0
+
+            page_host = urlparse(self.url).netloc.lower()
+
             for link in self.soup.find_all('link', href=True):
-                if 'icon' in (link.get('rel', [''])[0] if isinstance(link.get('rel'), list) else link.get('rel', '')).lower():
-                    if self.domain in link['href']:
-                        return 1  # favicon loaded from same domain
+                rel = link.get('rel', [])
+                if isinstance(rel, list):
+                    rel_value = ' '.join(rel).lower()
+                else:
+                    rel_value = str(rel).lower()
+
+                if 'icon' in rel_value:
+                    favicon_url = urljoin(self.url, link['href'])
+                    favicon_host = urlparse(favicon_url).netloc.lower()
+
+                    if favicon_host == page_host:
+                        return 1
                     else:
-                        return -1  # favicon loaded from external domain
-            return 0  # no favicon found
-        except: return 0
+                        return -1
+
+            return 0
+        except Exception:
+            return 0
 
     def NonStdPort(self) -> int:
         return -1 if ':' in self.domain else 1
