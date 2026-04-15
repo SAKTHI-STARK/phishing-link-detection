@@ -40,9 +40,10 @@ FEATURE_METHODS = {
     "AgeofDomain": "AgeofDomain",
     "DNSRecording": "DNSRecording",
     "PageRank": "PageRank",
-    "GoogleIndex": "GoogleIndex",
     "LinksPointingToPage": "LinksPointingToPage",
-    "StatsReport": "StatsReport"
+    "StatsReport": "StatsReport",
+    "DomainEntropy": "DomainEntropy",
+    "FreeHosting": "FreeHosting"
 }
 
 DEFAULT_FEATURE_NAMES = [
@@ -52,7 +53,7 @@ DEFAULT_FEATURE_NAMES = [
     "LinksInScriptTags", "ServerFormHandler", "InfoEmail", "AbnormalURL",
     "WebsiteForwarding", "StatusBarCust", "DisableRightClick",
     "UsingPopupWindow", "IframeRedirection", "AgeofDomain",
-    "DNSRecording", "PageRank", "GoogleIndex",
+    "DNSRecording", "PageRank",
     "LinksPointingToPage", "StatsReport"
 ]
 
@@ -68,3 +69,33 @@ FEATURES_NEEDING_HTML = [
 FEATURES_NEEDING_WHOIS = [
     "DomainRegLen", "AbnormalURL", "AgeofDomain", "DNSRecording"
 ]
+
+FEATURE_SEVERITY = {
+    "critical": {
+        "weight": 3.0,
+        "features": [
+            "UsingIP", "ServerFormHandler", "FreeHosting", "StatsReport", "DomainEntropy"
+        ]
+    },
+    "high": {
+        "weight": 2.0,
+        "features": [
+            "RequestURL", "AnchorURL", "LinksInScriptTags", "WebsiteForwarding",
+            "HTTPS", "AbnormalURL", "IframeRedirection"
+        ]
+    },
+    "medium": {
+        "weight": 1.5,
+        "features": [
+            "AgeofDomain", "DomainRegLen", "DNSRecording", "SubDomains",
+            "PrefixSuffix-", "DisableRightClick", "UsingPopupWindow"
+        ]
+    },
+    "low": {
+        "weight": 1.0,
+        "features": [
+            "LongURL", "ShortURL", "Symbol@", "Redirecting//", "InfoEmail",
+            "StatusBarCust", "LinksPointingToPage", "Favicon", "NonStdPort", "HTTPSDomainURL", "PageRank"
+        ]
+    }
+}

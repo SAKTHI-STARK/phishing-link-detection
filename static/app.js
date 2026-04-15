@@ -147,11 +147,6 @@ document.addEventListener('DOMContentLoaded', () => {
             '0':  'Page rank unknown',
             '-1': 'Low page rank (≥ 100K)'
         },
-        GoogleIndex: {
-            '1':  'Page is Google-indexed',
-            '0':  'Could not verify',
-            '-1': 'Page not indexed by Google'
-        },
         LinksPointingToPage: {
             '1':  'No inbound links (clean)',
             '0':  '1-2 inbound links',
@@ -164,32 +159,31 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     };
 
-    // Feature categories for grouping
+    // Feature categories grouped by severity tier
     const FEATURE_CATEGORIES = [
         {
-            name: 'URL Structure',
-            icon: 'fa-link',
-            keys: ['UsingIP', 'LongURL', 'ShortURL', 'Symbol@', 'Redirecting//', 'PrefixSuffix-', 'SubDomains']
+            name: 'Critical',
+            icon: 'fa-circle-exclamation',
+            color: '#ef4444',
+            keys: ['UsingIP', 'HTTPS', 'ShortURL', 'StatsReport']
         },
         {
-            name: 'Security & SSL',
-            icon: 'fa-lock',
-            keys: ['HTTPS', 'NonStdPort', 'HTTPSDomainURL']
+            name: 'High',
+            icon: 'fa-triangle-exclamation',
+            color: '#f97316',
+            keys: ['AgeofDomain', 'DomainRegLen', 'DNSRecording', 'AbnormalURL', 'HTTPSDomainURL', 'NonStdPort', 'SubDomains', 'PrefixSuffix-']
         },
         {
-            name: 'Domain Trust',
-            icon: 'fa-building',
-            keys: ['DomainRegLen', 'AbnormalURL', 'AgeofDomain', 'DNSRecording', 'PageRank', 'GoogleIndex', 'StatsReport']
+            name: 'Medium',
+            icon: 'fa-shield-halved',
+            color: '#eab308',
+            keys: ['RequestURL', 'AnchorURL', 'ServerFormHandler', 'LinksInScriptTags', 'Favicon', 'WebsiteForwarding', 'IframeRedirection', 'PageRank']
         },
         {
-            name: 'Page Content',
-            icon: 'fa-code',
-            keys: ['Favicon', 'RequestURL', 'AnchorURL', 'LinksInScriptTags', 'ServerFormHandler', 'InfoEmail', 'LinksPointingToPage']
-        },
-        {
-            name: 'Behavioral',
-            icon: 'fa-bug',
-            keys: ['WebsiteForwarding', 'StatusBarCust', 'DisableRightClick', 'UsingPopupWindow', 'IframeRedirection']
+            name: 'Low',
+            icon: 'fa-info-circle',
+            color: '#6b7280',
+            keys: ['LongURL', 'Symbol@', 'Redirecting//', 'InfoEmail', 'StatusBarCust', 'DisableRightClick', 'UsingPopupWindow', 'LinksPointingToPage']
         }
     ];
 
@@ -276,7 +270,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         // --- Features Table ---
-        renderFeaturesTable(data.features_detail);
+        renderFeaturesTable(data.features_detail, data.severity_breakdown);
 
         // Smooth scroll to result
         resultSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -300,7 +294,7 @@ document.addEventListener('DOMContentLoaded', () => {
         return 'Suspicious indicator';
     }
 
-    function renderFeaturesTable(features) {
+    function renderFeaturesTable(features, severityBreakdown) {
         if (!features) return;
 
         featuresTableBody.innerHTML = '';
@@ -308,14 +302,28 @@ document.addEventListener('DOMContentLoaded', () => {
         let safeCount = 0, suspiciousCount = 0, phishingCount = 0;
         let rowIndex = 0;
 
-        // Iterate by category
+        // Iterate by severity category
         FEATURE_CATEGORIES.forEach(cat => {
-            // Category header row
+            // Count flagged features in this category
+            let catFlagged = 0;
+            let catTotal = 0;
+            cat.keys.forEach(key => {
+                const feat = features[key];
+                if (feat) {
+                    catTotal++;
+                    if (feat.value <= -1) catFlagged++;
+                }
+            });
+
+            // Category header row with severity badge
             const headerTr = document.createElement('tr');
             headerTr.className = 'category-header-row';
             headerTr.innerHTML = `
                 <td colspan="4">
-                    <i class="fas ${cat.icon}"></i> ${cat.name}
+                    <span class="severity-badge" style="background: ${cat.color}; color: white; padding: 2px 8px; border-radius: 4px; font-size: 0.7rem; margin-right: 8px; text-transform: uppercase; letter-spacing: 0.5px;">${cat.name}</span>
+                    <i class="fas ${cat.icon}" style="color: ${cat.color}; margin-right: 4px;"></i>
+                    ${cat.name} Severity
+                    <span style="float: right; font-size: 0.8rem; opacity: 0.7;">${catFlagged}/${catTotal} flagged</span>
                 </td>
             `;
             featuresTableBody.appendChild(headerTr);

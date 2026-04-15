@@ -5,8 +5,10 @@ import socket
 import requests
 import whois
 import logging
+import math
 from bs4 import BeautifulSoup
-from googlesearch import search
+from collections import Counter
+
 from datetime import date
 from urllib.parse import urljoin, urlparse
 
@@ -367,12 +369,6 @@ class FeatureExtraction:
             return 1 if rank < 100000 else -1
         except: return 0
 
-    def GoogleIndex(self) -> int:
-        try:
-            results = list(search(self.url, num_results=1))
-            return 1 if results else -1
-        except: return 0
-
     def LinksPointingToPage(self) -> int:
         try:
             if not self.response: return 0
@@ -389,3 +385,38 @@ class FeatureExtraction:
             bad_ip = re.search(r'146\.112\.61\.108|216\.218\.185\.162', ip)
             return -1 if bad_url or bad_ip else 1
         except: return 1
+
+    def DomainEntropy(self) -> int:
+        try:
+            domain = self.urlparse.netloc
+            if not domain:
+                return 1
+            if domain.startswith("www."):
+                domain = domain[4:]
+            p, lns = Counter(domain), float(len(domain))
+            if lns == 0:
+                return 1
+            entropy = -sum(count/lns * math.log2(count/lns) for count in p.values())
+            if entropy > 3.8:
+                return -1
+            elif entropy > 3.2:
+                return 0
+            else:
+                return 1
+        except:
+            return 0
+
+    def FreeHosting(self) -> int:
+        try:
+            domain = self.urlparse.netloc.lower()
+            free_hosts = [
+                'ukit.me', 'wixsite.com', 'wordpress.com', 'github.io', 
+                'netlify.app', 'weebly.com', '000webhostapp.com',
+                'blogspot.com', 'herokuapp.com', 'pythonanywhere.com',
+                'glitch.me', 'vercel.app', 'render.com', 'bitbucket.io'
+            ]
+            for host in free_hosts:
+                if domain.endswith(host):
+                    return -1
+            return 1
+        except: return 0
